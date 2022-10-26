@@ -36,10 +36,21 @@ namespace
         const std::string shiftInsertHead2 = "(sftH2)";
         const std::string shiftInsertGuard1 = "(sftG1)";
         const std::string shiftInsertGuard2 = "(sftG2)";
+        const std::string afterShiftSearch = "(sftsrch)";
 
         // searchers
         const std::string searchFirst = "(srchF)";
-        const std::string seatchSecond = "(srchS)";
+        const std::string searchSecond = "(srchS)";
+        const std::string fetchFirst = "(ftchF)";
+        const std::string fetchedFirst = "(ftchdF)";
+        const std::string fetchSecond = "(ftchS)";
+
+        // mutators
+        const std::string mutateFirst = "(mtxF)";
+        const std::string mutateSecond = "(mtxS)";
+
+        // separator reject
+        const std::string die = "(die)";
 
         const std::string test = "(test)";
     }
@@ -51,10 +62,10 @@ namespace
     }
     namespace letter
     {
-        const std::string headIndicator = "*";
-        const std::string leftGuardIndicator = "@";
-        const std::string separatorIndicator = "#";
-        const std::string rightGuardIdicator = "$";
+        const std::string headIndicator = "1";
+        const std::string leftGuardIndicator = "LG";
+        const std::string separatorIndicator = "Sep";
+        const std::string rightGuardIdicator = "RG";
     }
 
     std::string leftGuard;
@@ -87,6 +98,7 @@ namespace
         newTape.push_back(leftGuard);
         // we inserted everything in the reversed order so we reverse it
         std::ranges::reverse(newTape);
+
         return std::vector<std::vector<std::string>>{newTape};
     }
 
@@ -100,15 +112,11 @@ namespace
                               { transitions[{state::seekSeparator, {letter}}] = {state::seekSeparator, {letter}, move::right}; });
 
         // TODO: some initial searchers as in general case we would have the data from the other head
-        transitions[{state::seekSeparator, {separator}}] = {p(state::test + "(copyA)"), {separator}, move::left};
+        transitions[{state::seekSeparator, {separator}}] = {state::searchFirst, {separator}, move::left};
 
         return std::move(transitions);
     }
 
-    // wnioski
-    // zawsze musimy trzymać stan co ssie pałke
-    // taktyka taka że kopiujemy co 2 na końcu trzeba będzie poprawić head 2 taśmy oraz (raczej) guarda
-    // po poprawieniu heada jesteśmy w sytuacji standardowej z literą z lewej taśmy jako blank wiec lecimy dalej
     transitions_t &&addResizers(transitions_t &&transitions)
     {
         std::vector<std::string> alphabetSep = alphabet;
@@ -148,9 +156,14 @@ namespace
                 std::ranges::for_each(alphabet, [&](const auto &letterToRemember)
                                       { transitions[{p(state::shiftInsertGuard1 + state + letter), {BLANK}}] =
                                             {p(state::shiftInsertGuard2 + state), {letter}, move::right}; });
-                transitions[{p(state::shiftInsertGuard2 + state), {BLANK}}] =
-                    {ACCEPTING_STATE, {rightGuard}, move::left};
+
+                // search for the second's tape indicator
+                transitions[{p(state::afterShiftSearch + state), {letter}}] = {p(state::afterShiftSearch + state), {letter}, move::left};
             }
+            transitions[{p(state::shiftInsertGuard2 + state), {BLANK}}] =
+                {p(state::afterShiftSearch + state), {rightGuard}, move::left};
+            // we found the second star - continue if nothing happened and first star was set on blank
+            transitions[{p(state::afterShiftSearch + state), {letter::headIndicator}}] = {p(state::searchSecond + state + BLANK), {letter::headIndicator}, move::stay};
         }
 
         return std::move(transitions);
@@ -158,6 +171,61 @@ namespace
 
     transitions_t &&addSeparatorRejects(transitions_t &&transitions)
     {
+        // we want to preserve the error message for being out of bounds so we are going to produce it by going left to the -1 index
+        std::ranges::for_each(extAlphabet, [&](const auto &letter)
+                              { transitions[{state::die, {letter}}] = {state::die, {letter}, move::left}; });
+        return std::move(transitions);
+    }
+
+    transitions_t &&addSearchersAndFetchers(transitions_t &&transitions)
+    {
+        transitions[{state::searchFirst, {letter::headIndicator}}] = {state::fetchFirst, {letter::headIndicator}, move::left};
+        std::ranges::for_each(alphabet, [&](const auto &letter)
+                              { transitions[{state::fetchFirst, {letter}}] = {p(state::fetchedFirst + INITIAL_STATE + letter),
+                                                                              {letter},
+                                                                              move::right}; });
+        for (const auto &state : originalStates)
+        {
+            for (const auto &letter : alphabet)
+            {
+                // go search right indicator
+                // POSSIBLY ONLY AT THE BEGGINING
+                transitions[{p(state::fetchedFirst + state + letter), {letter::headIndicator}}] = {p(state::searchSecond + state + letter),
+                                                                                                   {letter::headIndicator},
+                                                                                                   move::right};
+                // skip everything along the way
+                std::ranges::for_each(extAlphabet, [&](const auto &toSkip)
+                                      { transitions[{p(state::searchSecond + state + letter), {toSkip}}] =
+                                            {p(state::searchSecond + state + letter), {toSkip}, move::right}; });
+                // found the indicator
+                transitions[{p(state::searchSecond + state + letter), {letter::headIndicator}}] =
+                    {p(state::fetchSecond + state + letter), {letter::headIndicator}, move::right};
+
+                // fetch second and mutate second indicator
+                std::ranges::for_each(alphabet, [&](const auto &toFetch)
+                                      { transitions[{p(state::fetchSecond + state + letter), {toFetch}}] =
+                                            {p(state::mutateSecond + state + letter + toFetch), {toFetch}, move::left}; });
+
+                // skip everything along the way searching the left indicator
+                std::ranges::for_each(extAlphabet, [&](const auto &toSkip)
+                                      { transitions[{p(state::searchFirst + state + letter), {toSkip}}] =
+                                            {p(state::searchFirst + state + letter), {toSkip}, move::left}; });
+                // found the left indicator fetch letter
+                transitions[{p(state::searchFirst + state + letter), {letter::headIndicator}}] =
+                    {p(state::fetchFirst + state + letter), {letter::headIndicator}, move::left};
+                // fetch first and go mutate first indicator
+                std::ranges::for_each(alphabet, [&](const auto &toFetch)
+                                      { transitions[{p(state::fetchFirst + state + letter), {toFetch}}] =
+                                            {p(state::mutateFirst + state + toFetch + state), {toFetch}, move::right}; });
+            }
+        }
+
+        return std::move(transitions);
+    }
+
+    transitions_t &&addMutators(transitions_t &&transitions)
+    {
+
         return std::move(transitions);
     }
 
@@ -190,8 +258,11 @@ void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes)
     // make new states
     this->transitions =
         addTest(
-            addResizers(
-                addSeparatorSeekers(*this, transitions_t())));
+            addMutators(
+                addSearchersAndFetchers(
+                    addSeparatorRejects(
+                        addResizers(
+                            addSeparatorSeekers(*this, transitions_t()))))));
 }
 //--------------------------------------------------------------------------------------------//
 
