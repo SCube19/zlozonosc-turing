@@ -5,7 +5,7 @@
 # For information on possible names of states and letters check a comment in turing_machine.h
 
 num-tapes: 2          # mendatory - number of tapes
-input-alphabet: a b c  # mendatory - letters allowed to occur on input
+input-alphabet: a b c # mendatory - letters allowed to occur on input
 
 # next, we have a list of transitions, in the format:
 # <p> <a_1> ... <a_k> <q> <b_1> ... <b_k> <d_1> ... <d_k>
@@ -17,12 +17,13 @@ input-alphabet: a b c  # mendatory - letters allowed to occur on input
 
 # first, we copy the input to the second tape, but we shift it one cell right
 (start) _ _ (accept) _ _ - -
-(start) a _ (next) b _ - -
-(start) b _ (next) c _ - -
+(start) a _ (next) b a - >
+(start) b _ (next) c c - <
 (start) c _ (decide) c _ > -
-(next) b _ (next) c _ - -
-(next) c _ (decide) c _ > -
-(decide) a _ (almost) b _ > -
-(almost) _ _ (almost) a _ - -
-(almost) a _ (accept) a _ - -
+(next) b _ (next) c _ - <
+(next) c a (decide) c a > -
+(decide) a a (almost) b _ > -
+(almost) _ a (almost) a _ - -
+(almost) a a (accept) a _ - -
+(almost) _ _ (accept) _ _ - -
 

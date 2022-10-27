@@ -36,6 +36,9 @@ const std::string shiftInsertHead2 = "(sftH2)";
 const std::string shiftInsertGuard1 = "(sftG1)";
 const std::string shiftInsertGuard2 = "(sftG2)";
 const std::string afterShiftSearch = "(sftsrch)";
+const std::string resizeRight1 = "(rsz1)";
+const std::string resizeRight2 = "(rsz2)";
+const std::string afterResizeSearch = "(rszsrch)";
 
 // searchers
 const std::string searchFirst = "(srchF)";
@@ -147,6 +150,29 @@ transitions_t &&addResizers(transitions_t &&transitions) {
             move::right};
 
         for (const auto &letter : alphabetSep) {
+            transitions[{p(state::mutateSecond + state + letter),
+                         {rightGuard}}] = {
+                p(state::resizeRight1 + state + letter),
+                {letter::headIndicator},
+                move::right};
+            transitions[{p(state::resizeRight1 + state + letter), {BLANK}}] = {
+                p(state::resizeRight2 + state + letter), {BLANK}, move::right};
+            transitions[{p(state::resizeRight2 + state + letter), {BLANK}}] = {
+                p(state::afterResizeSearch + state + letter),
+                {rightGuard},
+                move::left};
+
+            transitions[{p(state::afterResizeSearch + state + letter),
+                         {BLANK}}] = {
+                p(state::afterResizeSearch + state + letter),
+                {BLANK},
+                move::left};
+            transitions[{p(state::afterResizeSearch + state + letter),
+                         {letter::headIndicator}}] = {
+                p(state::searchFirst + state + letter),
+                {letter::headIndicator},
+                move::left};
+
             // initial erasure + later star shift on the second tape
             std::ranges::for_each(alphabet, [&](const auto &letterToRemember) {
                 transitions[{p(state::shiftInsertHead1 + state + letter),
@@ -337,8 +363,8 @@ transitions_t &&addMutators(const TuringMachine &tm,
                     transitions[{
                         p(state::mutateSecond + state + letter1 + letter2),
                         {letter::headIndicator}}] = {
-                        p(state::mutateSecond + state + newLetters[1] +
-                          move::id(moves[1])),
+                        p(state::mutateSecond + state + "(new)" +
+                          newLetters[1] + move::id(moves[1])),
                         {BLANK},
                         move::right};
                 }
@@ -369,47 +395,57 @@ transitions_t &&addMutators(const TuringMachine &tm,
                     p(state::die), {separator}, move::left};
 
                 // second mutators
-                transitions[{
-                    p(state::mutateSecond + state + letter1 + move::leftId),
-                    {letter2}}] = {
-                    p(state::mutateSecond + state + move::leftId),
+                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
+                               move::leftId),
+                             {letter2}}] = {
+                    p(state::mutateSecond + state + letter2 + move::leftId),
                     {letter1},
                     move::left};
 
-                transitions[{
-                    p(state::mutateSecond + state + letter1 + move::stayId),
-                    {letter2}}] = {
-                    p(state::mutateSecond + state), {letter1}, move::left};
-
-                transitions[{
-                    p(state::mutateSecond + state + letter1 + move::rightId),
-                    {letter2}}] = {
-                    p(state::mutateSecond + state), {letter1}, move::right};
-
-                transitions[{p(state::mutateSecond + state + move::leftId),
-                             {BLANK}}] = {
-                    p(state::mutateSecond + state + "2" + move::leftId),
-                    {BLANK},
+                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
+                               move::stayId),
+                             {letter2}}] = {
+                    p(state::mutateSecond + state + letter2),
+                    {letter1},
                     move::left};
-                transitions[{p(state::mutateSecond + state + move::leftId),
-                             {separator}}] = {
-                    p(state::die), {separator}, move::left};
+
+                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
+                               move::rightId),
+                             {letter2}}] = {
+                    p(state::mutateSecond + state + letter2),
+                    {letter1},
+                    move::right};
+
+                transitions[{
+                    p(state::mutateSecond + state + letter1 + move::leftId),
+                    {BLANK}}] = {p(state::mutateSecond + state + letter1 + "2" +
+                                   move::leftId),
+                                 {BLANK},
+                                 move::left};
+                transitions[{
+                    p(state::mutateSecond + state + letter1 + move::leftId),
+                    {separator}}] = {p(state::die), {separator}, move::left};
+
+                transitions[{p(state::mutateSecond + state + letter2 + "2" +
+                               move::leftId),
+                             {letter1}}] = {
+                    p(state::mutateSecond + state + letter2),
+                    {letter1},
+                    move::left};
             }
             // there was a right mutation
             transitions[{p(state::mutateFirst + state + "2" + move::leftId),
                          {letter1}}] = {
                 p(state::mutateFirst + state), {letter1}, move::right};
-            transitions[{p(state::mutateSecond + state + "2" + move::leftId),
-                         {letter1}}] = {
-                p(state::mutateSecond + state), {letter1}, move::left};
+
+            transitions[{p(state::mutateSecond + state + letter1), {BLANK}}] = {
+                p(state::searchFirst + state + letter1),
+                {letter::headIndicator},
+                move::left};
         }
         // found the place to put indicator
         transitions[{p(state::mutateFirst + state), {BLANK}}] = {
             p(state::fetchFirst + state), {letter::headIndicator}, move::left};
-        transitions[{p(state::mutateSecond + state), {BLANK}}] = {
-            p(state::fetchSecond + state),
-            {letter::headIndicator},
-            move::right};
     }
 
     return std::move(transitions);
@@ -433,9 +469,9 @@ void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes) {
     originalStates = this->set_of_states();
 
     // define alphabets
-    std::ranges::copy(originalStates,
-                      std::ostream_iterator<std::string>(std::cout, " "));
-    std::cout << std::endl;
+    // std::ranges::copy(originalStates,
+    //                   std::ostream_iterator<std::string>(std::cout, " "));
+    // std::cout << std::endl;
     alphabet = this->working_alphabet();
     extAlphabetNoSep = alphabet;
     std::ranges::copy(std::vector<std::string>{leftGuard, rightGuard, separator,
@@ -455,7 +491,7 @@ void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes) {
     //     std::get<2>(to)
     //     << std::endl;
     // }
-    // std::cout << "number of states: " << this->transitions.size();
+    std::cout << "number of states: " << this->transitions.size();
 }
 //--------------------------------------------------------------------------------------------//
 
