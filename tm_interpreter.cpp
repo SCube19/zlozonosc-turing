@@ -13,7 +13,7 @@ static bool verbose = true;
 
 static void print_usage(string error) {
     cerr << "ERROR: " << error << "\n"
-         << "Usage: tm_interpreter [-q|--quiet] <input_file> <input>\n";
+         << "Usage: tm_interpreter <input_file>\n";
     exit(1);
 }
 
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
             ++ok;
         }
     }
-    if (ok != 2) print_usage("Not enough arguments");
+    if (ok != 1) print_usage("Not enough arguments");
 
     FILE *f = fopen(filename.c_str(), "r");
     if (!f) {
@@ -101,25 +101,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     TuringMachine tm = read_tm_from_file(f);
-    tapes.resize(tm.num_tapes);
-    heads.resize(tm.num_tapes);
-    tapes[0] = tm.parse_input(input);
-    if (tapes[0].empty() && input != "") {
-        cerr << "ERROR: The last argument is not a sequence of input letters\n";
-        return 1;
-    }
-    append_blanks_under_heads();
 
+    //-----------------CONVERSION-----------------//
     tm.twoToOne(tapes);
-    // return 0;
-    std::ofstream file("converted.tm", std::ofstream::out);
-    file << tm;
 
-    if (verbose) print_configuration();
-    for (;;) {
-        execute_step(tm);
-        if (verbose) print_configuration();
-        if (state == REJECTING_STATE) halt(false);
-        if (state == ACCEPTING_STATE) halt(true);
-    }
+    std::ofstream file("converted.tm");
+    file << tm;
+    file.close();
+
+    // if (verbose) print_configuration();
+    // for (;;) {
+    //     execute_step(tm);
+    //     if (verbose) print_configuration();
+    //     if (state == REJECTING_STATE) halt(false);
+    //     if (state == ACCEPTING_STATE) halt(true);
+    // }
 }

@@ -13,13 +13,22 @@
 
 using namespace std;
 
-//------------------------ CONVERSION IMPLEMENTATION
-//-----------------------------------------//
+//--------------CONVERSION IMPLEMENTATION--------------------//
 namespace {
+// simple parentheses macro
 #define p(x) "(" + x + ")"
 
-constexpr int initialPadding = 100;
 namespace state {
+// initial tape preparation
+const std::string placeLeftGuard = "(pLG)";
+const std::string placeRightGuard = "(pRG)";
+const std::string reverseFind = "(rvF)";
+const std::string reversePlace = "(rvP)";
+const std::string reverseSkip = "(rvS)";
+const std::string createRightTape = "(crtS)";
+const std::string prepareFirstTape = "(prprF)";
+
+// initial state to seek middle separator
 const std::string seekSeparator = "(sS)";
 
 // head movers
@@ -54,8 +63,6 @@ const std::string mutateSecond = "(mtxS)";
 
 // separator reject
 const std::string die = "(die)";
-
-const std::string test = "(test)";
 }  // namespace state
 
 namespace move {
@@ -73,72 +80,142 @@ const std::string id(const char mv) {
 
 }  // namespace move
 namespace letter {
+// inidicates where the head is on the virtual tape
 const std::string headIndicator = "1";
+// allows to determine if we are on the 0-th cell
 const std::string leftGuardIndicator = "LG";
+// separates two virtual tapes
 const std::string separatorIndicator = "Sep";
+// determines the end of tape when resizing/shifting
 const std::string rightGuardIdicator = "RG";
+const std::string reversePlaceholder = "Rv";
 }  // namespace letter
 
+// actual unique letters using letter:: namespace
 std::string leftGuard;
 std::string separator;
 std::string rightGuard;
+std::string reverseIndicator;
+
+// original working alphabet
 std::vector<std::string> alphabet;
+// original working alphabet + leftGuard + rightGuard + separator +
+// letter::headIndicator
 std::vector<std::string> extAlphabet;
+// extAlphabet - separator
 std::vector<std::string> extAlphabetNoSep;
+// all the original machine's states
 std::vector<std::string> originalStates;
 
-inline std::vector<std::vector<std::string>> prepareTape(
-    TuringMachine &tm, const std::vector<std::vector<std::string>> &original) {
+void prepareGlobals(const TuringMachine &tm) {
+    // define states
+    originalStates = tm.set_of_states();
+
     // defining new symbols as longest letter + something ensuring uniqueness of
     // guard and separator
     std::string longest = *std::ranges::max_element(
-        original[0],
+        tm.input_alphabet,
         [](std::string a, std::string b) { return a.size() < b.size(); });
     leftGuard = p(letter::leftGuardIndicator + longest);
     rightGuard = p(letter::rightGuardIdicator + longest);
     separator = p(letter::separatorIndicator + longest);
+    reverseIndicator = p(letter::reversePlaceholder + longest);
 
-    //"*" are head indicator
-    std::vector<std::string> newTape{rightGuard, BLANK, letter::headIndicator,
-                                     separator};
-
-    // for every letter insert _ letter
-    std::ranges::for_each(original[0], [&newTape](const auto &a) {
-        newTape.push_back(BLANK);
-        newTape.push_back(a);
-    });
-    // head indicator for the first tape
-    newTape[4] = letter::headIndicator;
-    // some inital overhead as to not resize on small tapes
-    // std::ranges::copy(std::vector<std::string>(initialPadding, BLANK),
-    // std::back_inserter(newTape));
-    newTape.push_back(leftGuard);
-    // we inserted everything in the reversed order so we reverse it
-    std::ranges::reverse(newTape);
-
-    return std::vector<std::vector<std::string>>{newTape};
+    // define alphabets
+    alphabet = tm.working_alphabet();
+    extAlphabetNoSep = alphabet;
+    std::ranges::copy(std::vector<std::string>{leftGuard, rightGuard, separator,
+                                               letter::headIndicator},
+                      std::back_inserter(extAlphabetNoSep));
+    extAlphabet = extAlphabetNoSep;
+    extAlphabet.push_back(separator);
 }
 
-transitions_t &&addSeparatorSeekers(const TuringMachine &tm,
-                                    transitions_t &&transitions) {
-    // seek separator from the start
-    transitions[{INITIAL_STATE, {leftGuard}}] = {
-        state::seekSeparator, {leftGuard}, move::right};
+// creates tape for the converted machine to recognize
+transitions_t &&addTapePreparators(transitions_t &&transitions) {
+    for (const auto &letter : alphabet) {
+        // initial guard insert and copying
+        transitions[{INITIAL_STATE, {letter}}] = {
+            p(state::placeLeftGuard + letter), {leftGuard}, move::right};
+        std::ranges::for_each(alphabet, [&](const auto &current) {
+            transitions[{p(state::placeLeftGuard + letter), {current}}] = {
+                p(state::placeLeftGuard + current), {letter}, move::right};
+        });
+        transitions[{p(state::placeLeftGuard + letter), {BLANK}}] = {
+            state::reverseFind, {letter}, move::stay};
 
-    std::ranges::for_each(extAlphabetNoSep, [&](const auto &letter) {
-        transitions[{state::seekSeparator, {letter}}] = {
-            state::seekSeparator, {letter}, move::right};
-    });
+        transitions[{state::reverseFind, {letter}}] = {
+            p(state::reversePlace + letter), {reverseIndicator}, move::right};
+        transitions[{state::reverseFind, {reverseIndicator}}] = {
+            state::reverseFind, {reverseIndicator}, move::left};
 
-    // TODO: some initial searchers as in general case we would have the data
-    // from the other head
+        std::ranges::for_each(alphabet, [&](const auto &current) {
+            transitions[{p(state::reversePlace + letter), {current}}] = {
+                p(state::reversePlace + letter), {current}, move::right};
+        });
+        transitions[{p(state::reversePlace + letter), {reverseIndicator}}] = {
+            p(state::reversePlace + letter), {reverseIndicator}, move::right};
+        transitions[{p(state::reversePlace + letter), {BLANK}}] = {
+            state::reverseSkip, {letter}, move::left};
+
+        transitions[{state::reverseSkip, {letter}}] = {
+            state::reverseSkip, {letter}, move::left};
+
+        transitions[{state::prepareFirstTape, {letter}}] = {
+            p(state::prepareFirstTape + letter),
+            {reverseIndicator},
+            move::left};
+        transitions[{p(state::prepareFirstTape + letter), {reverseIndicator}}] =
+            {p(state::prepareFirstTape + letter),
+             {reverseIndicator},
+             move::left};
+        transitions[{p(state::prepareFirstTape + letter), {leftGuard}}] = {
+            p(state::prepareFirstTape + letter + "1"),
+            {leftGuard},
+            move::right};
+        transitions[{p(state::prepareFirstTape + letter), {BLANK}}] = {
+            p(state::prepareFirstTape + letter + "1"), {BLANK}, move::right};
+        transitions[{p(state::prepareFirstTape + letter + "1"),
+                     {reverseIndicator}}] = {
+            p(state::prepareFirstTape + "2"), {letter}, move::right};
+        transitions[{p(state::prepareFirstTape + "2"), {reverseIndicator}}] = {
+            state::prepareFirstTape, {BLANK}, move::right};
+    }
+    transitions[{state::reverseFind, {leftGuard}}] = {
+        state::prepareFirstTape, {leftGuard}, move::right};
+
+    transitions[{state::reverseSkip, {reverseIndicator}}] = {
+        state::reverseFind, {reverseIndicator}, move::left};
+
+    transitions[{state::prepareFirstTape, {reverseIndicator}}] = {
+        state::prepareFirstTape, {reverseIndicator}, move::right};
+    transitions[{state::prepareFirstTape, {BLANK}}] = {
+        state::createRightTape, {BLANK}, move::left};
+
+    transitions[{state::createRightTape, {BLANK}}] = {
+        p(state::createRightTape + "1"), {letter::headIndicator}, move::right};
+    transitions[{p(state::createRightTape + "1"), {BLANK}}] = {
+        p(state::createRightTape + "2"), {separator}, move::right};
+    transitions[{p(state::createRightTape + "2"), {BLANK}}] = {
+        p(state::createRightTape + "3"), {letter::headIndicator}, move::right};
+    transitions[{p(state::createRightTape + "3"), {BLANK}}] = {
+        p(state::createRightTape + "4"), {BLANK}, move::right};
+    transitions[{p(state::createRightTape + "4"), {BLANK}}] = {
+        state::seekSeparator, {rightGuard}, move::left};
+
+    transitions[{state::seekSeparator, {BLANK}}] = {
+        state::seekSeparator, {BLANK}, move::left};
+    transitions[{state::seekSeparator, {letter::headIndicator}}] = {
+        state::seekSeparator, {letter::headIndicator}, move::left};
+
     transitions[{state::seekSeparator, {separator}}] = {
-        state::searchFirst, {separator}, move::left};
-
+        ACCEPTING_STATE, {separator}, move::left};
     return std::move(transitions);
 }
 
+// adds states for the purpose of resizing/shifting the tape
 transitions_t &&addResizers(transitions_t &&transitions) {
+    // optimize number of states by creating alphabet + separator
     std::vector<std::string> alphabetSep = alphabet;
     alphabetSep.push_back(separator);
 
@@ -150,30 +227,36 @@ transitions_t &&addResizers(transitions_t &&transitions) {
             move::right};
 
         for (const auto &letter : alphabetSep) {
+            // resizing right tape works a little bit different from shifting
+            // so new states are necessary
+            // start resizing
             transitions[{p(state::mutateSecond + state + letter),
                          {rightGuard}}] = {
                 p(state::resizeRight1 + state + letter),
                 {letter::headIndicator},
                 move::right};
+            // continue resizing
             transitions[{p(state::resizeRight1 + state + letter), {BLANK}}] = {
                 p(state::resizeRight2 + state + letter), {BLANK}, move::right};
+            // resizing done go back to the head
             transitions[{p(state::resizeRight2 + state + letter), {BLANK}}] = {
                 p(state::afterResizeSearch + state + letter),
                 {rightGuard},
                 move::left};
-
+            // we must encounter BLANK here
             transitions[{p(state::afterResizeSearch + state + letter),
                          {BLANK}}] = {
                 p(state::afterResizeSearch + state + letter),
                 {BLANK},
                 move::left};
+            // resizing done continue with the algorithm
             transitions[{p(state::afterResizeSearch + state + letter),
                          {letter::headIndicator}}] = {
                 p(state::searchFirst + state + letter),
                 {letter::headIndicator},
                 move::left};
 
-            // initial erasure + later star shift on the second tape
+            // initial erasure + later head shift on the second tape
             std::ranges::for_each(alphabet, [&](const auto &letterToRemember) {
                 transitions[{p(state::shiftInsertHead1 + state + letter),
                              {letterToRemember}}] = {
@@ -182,7 +265,7 @@ transitions_t &&addResizers(transitions_t &&transitions) {
                     move::right};
             });
 
-            // initial star insertion + later star insertion during shift on
+            // initial head insertion + later head insertion during shift on
             // second tape
             transitions[{p(state::shiftInsertHead2 + state + letter),
                          {BLANK}}] = {p(state::shiftCopy + state + letter),
@@ -212,26 +295,28 @@ transitions_t &&addResizers(transitions_t &&transitions) {
                 p(state::shiftInsertHead1 + state + letter),
                 {BLANK},
                 move::right};
+            // right guard encountered, start shifting it
             transitions[{p(state::shift + state + letter), {rightGuard}}] = {
                 p(state::shiftInsertGuard1 + state + letter),
                 {BLANK},
                 move::right};
 
-            // end of copying shift guard
+            // continue shifting guard
             std::ranges::for_each(alphabet, [&](const auto &letterToRemember) {
                 transitions[{p(state::shiftInsertGuard1 + state + letter),
                              {BLANK}}] = {
                     p(state::shiftInsertGuard2 + state), {letter}, move::right};
             });
 
-            // search for the second's tape indicator
+            // search for the second's tape head after shifting
             transitions[{p(state::afterShiftSearch + state), {letter}}] = {
                 p(state::afterShiftSearch + state), {letter}, move::left};
         }
+        // end shifting and search for the right head
         transitions[{p(state::shiftInsertGuard2 + state), {BLANK}}] = {
             p(state::afterShiftSearch + state), {rightGuard}, move::left};
-        // we found the second star - continue if nothing happened and first
-        // star was set on blank
+        // we found the second head - continue as if nothing happened and first
+        // head was set on blank
         transitions[{p(state::afterShiftSearch + state),
                      {letter::headIndicator}}] = {
             p(state::fetchSecond + state + BLANK),
@@ -242,6 +327,8 @@ transitions_t &&addResizers(transitions_t &&transitions) {
     return std::move(transitions);
 }
 
+// add state that ensures the machine's demise in the same way as on 2 tape
+// machine
 transitions_t &&addSeparatorRejects(transitions_t &&transitions) {
     // we want to preserve the error message for being out of bounds so we are
     // going to produce it by going left to the -1 index
@@ -252,7 +339,9 @@ transitions_t &&addSeparatorRejects(transitions_t &&transitions) {
     return std::move(transitions);
 }
 
+// add states that bounce between left and right head
 transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
+    // intial search
     transitions[{state::searchFirst, {letter::headIndicator}}] = {
         p(state::fetchFirst + INITIAL_STATE),
         {letter::headIndicator},
@@ -260,23 +349,26 @@ transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
 
     for (const auto &state : originalStates) {
         for (const auto &letter : alphabet) {
+            // simple fetcher states to get head's letter
             transitions[{p(state::fetchFirst + state), {letter}}] = {
                 p(state::fetchedFirst + state + letter), {letter}, move::right};
             transitions[{p(state::fetchSecond + state), {letter}}] = {
                 p(state::fetchedSecond + state + letter), {letter}, move::left};
-            // go search right indicator
-            // POSSIBLY ONLY AT THE BEGGINING
+
+            // go search right head
             transitions[{p(state::fetchedFirst + state + letter),
                          {letter::headIndicator}}] = {
                 p(state::searchSecond + state + letter),
                 {letter::headIndicator},
                 move::right};
+            // go search left head
             transitions[{p(state::fetchedSecond + state + letter),
                          {letter::headIndicator}}] = {
                 p(state::searchFirst + state + letter),
                 {letter::headIndicator},
                 move::left};
-            // skip everything along the way
+
+            // skip everything along the way during search
             std::ranges::for_each(extAlphabet, [&](const auto &toSkip) {
                 transitions[{p(state::searchSecond + state + letter),
                              {toSkip}}] = {
@@ -284,22 +376,6 @@ transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
                     {toSkip},
                     move::right};
             });
-            // found the indicator
-            transitions[{p(state::searchSecond + state + letter),
-                         {letter::headIndicator}}] = {
-                p(state::fetchSecond + state + letter),
-                {letter::headIndicator},
-                move::right};
-
-            // fetch second and mutate second indicator
-            std::ranges::for_each(alphabet, [&](const auto &toFetch) {
-                transitions[{p(state::fetchSecond + state + letter),
-                             {toFetch}}] = {
-                    p(state::mutateSecond + state + letter + toFetch),
-                    {toFetch},
-                    move::left};
-            });
-
             // skip everything along the way searching the left indicator
             std::ranges::for_each(extAlphabet, [&](const auto &toSkip) {
                 transitions[{p(state::searchFirst + state + letter),
@@ -308,13 +384,27 @@ transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
                     {toSkip},
                     move::left};
             });
-            // found the left indicator fetch letter
+
+            // found the head
+            transitions[{p(state::searchSecond + state + letter),
+                         {letter::headIndicator}}] = {
+                p(state::fetchSecond + state + letter),
+                {letter::headIndicator},
+                move::right};
             transitions[{p(state::searchFirst + state + letter),
                          {letter::headIndicator}}] = {
                 p(state::fetchFirst + state + letter),
                 {letter::headIndicator},
                 move::left};
-            // fetch first and go mutate first indicator
+
+            // fetch second letter and start transformation
+            std::ranges::for_each(alphabet, [&](const auto &toFetch) {
+                transitions[{p(state::fetchSecond + state + letter),
+                             {toFetch}}] = {
+                    p(state::mutateSecond + state + letter + toFetch),
+                    {toFetch},
+                    move::left};
+            });
             std::ranges::for_each(alphabet, [&](const auto &toFetch) {
                 transitions[{p(state::fetchFirst + state + letter),
                              {toFetch}}] = {
@@ -328,15 +418,20 @@ transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
     return std::move(transitions);
 }
 
+// main simulator states
 transitions_t &&addMutators(const TuringMachine &tm,
                             transitions_t &&transitions) {
-    // std::cout << "here2" << std::endl;
+    // consider every combination of letters and states
     for (const auto &state : originalStates) {
         for (const auto &letter1 : alphabet) {
             for (const auto &letter2 : alphabet) {
+                // check if such a transition exists (if not then it wont exist
+                // in converted machine and thus will reject)
                 if (auto it = tm.transitions.find({state, {letter1, letter2}});
                     it != tm.transitions.end()) {
+                    // get updated values
                     auto &[newState, newLetters, moves] = it->second;
+                    // accept accepting states
                     if (newState == ACCEPTING_STATE)
                         transitions[{
                             p(state::mutateFirst + state + letter1 + letter2),
@@ -344,6 +439,7 @@ transitions_t &&addMutators(const TuringMachine &tm,
                             ACCEPTING_STATE,
                             {letter::headIndicator},
                             move::stay};
+                    // reject rejecting states
                     else if (newState == REJECTING_STATE)
                         transitions[{
                             p(state::mutateFirst + state + letter1 + letter2),
@@ -351,7 +447,10 @@ transitions_t &&addMutators(const TuringMachine &tm,
                             REJECTING_STATE,
                             {letter::headIndicator},
                             move::stay};
+                    // create mutator state for any other state
                     else
+                        // go to the letter associated with current head with
+                        // new state, new letter, and direction
                         transitions[{
                             p(state::mutateFirst + state + letter1 + letter2),
                             {letter::headIndicator}}] = {
@@ -359,7 +458,10 @@ transitions_t &&addMutators(const TuringMachine &tm,
                               move::id(moves[0])),
                             {BLANK},
                             move::left};
-
+                    // create mutator for the second head
+                    // we dont update the saved state here as second head is
+                    // always one state ahead (or equal) that's also why we need
+                    // (new) label
                     transitions[{
                         p(state::mutateSecond + state + letter1 + letter2),
                         {letter::headIndicator}}] = {
@@ -369,22 +471,15 @@ transitions_t &&addMutators(const TuringMachine &tm,
                         move::right};
                 }
 
+                // first head mutators
+                // direction left
                 transitions[{
                     p(state::mutateFirst + state + letter1 + move::leftId),
                     {letter2}}] = {p(state::mutateFirst + state + move::leftId),
                                    {letter1},
                                    move::right};
-
-                transitions[{
-                    p(state::mutateFirst + state + letter1 + move::stayId),
-                    {letter2}}] = {
-                    p(state::mutateFirst + state), {letter1}, move::right};
-
-                transitions[{
-                    p(state::mutateFirst + state + letter1 + move::rightId),
-                    {letter2}}] = {
-                    p(state::mutateFirst + state), {letter1}, move::left};
-
+                // going left is going right on the virtual first tape and
+                // requires multiple steps
                 transitions[{p(state::mutateFirst + state + move::leftId),
                              {BLANK}}] = {
                     p(state::mutateFirst + state + "2" + move::leftId),
@@ -394,7 +489,21 @@ transitions_t &&addMutators(const TuringMachine &tm,
                              {separator}}] = {
                     p(state::die), {separator}, move::left};
 
+                // direction stay
+                transitions[{
+                    p(state::mutateFirst + state + letter1 + move::stayId),
+                    {letter2}}] = {
+                    p(state::mutateFirst + state), {letter1}, move::right};
+
+                // direction right
+                transitions[{
+                    p(state::mutateFirst + state + letter1 + move::rightId),
+                    {letter2}}] = {
+                    p(state::mutateFirst + state), {letter1}, move::left};
+
                 // second mutators
+                // initial left, we remember the original letter and keep it for
+                // the first head's mutator
                 transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
                                move::leftId),
                              {letter2}}] = {
@@ -402,20 +511,7 @@ transitions_t &&addMutators(const TuringMachine &tm,
                     {letter1},
                     move::left};
 
-                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
-                               move::stayId),
-                             {letter2}}] = {
-                    p(state::mutateSecond + state + letter2),
-                    {letter1},
-                    move::left};
-
-                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
-                               move::rightId),
-                             {letter2}}] = {
-                    p(state::mutateSecond + state + letter2),
-                    {letter1},
-                    move::right};
-
+                // going left requires multiple steps
                 transitions[{
                     p(state::mutateSecond + state + letter1 + move::leftId),
                     {BLANK}}] = {p(state::mutateSecond + state + letter1 + "2" +
@@ -432,68 +528,57 @@ transitions_t &&addMutators(const TuringMachine &tm,
                     p(state::mutateSecond + state + letter2),
                     {letter1},
                     move::left};
+
+                // initial stay, we remember the original letter and keep it for
+                // the first head's mutator
+                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
+                               move::stayId),
+                             {letter2}}] = {
+                    p(state::mutateSecond + state + letter2),
+                    {letter1},
+                    move::left};
+
+                // initial righ,twe remember the original letter and keep it for
+                // the first head's mutator
+                transitions[{p(state::mutateSecond + state + "(new)" + letter1 +
+                               move::rightId),
+                             {letter2}}] = {
+                    p(state::mutateSecond + state + letter2),
+                    {letter1},
+                    move::right};
             }
-            // there was a right mutation
+            // next step places the head after right mutation on the first tape
             transitions[{p(state::mutateFirst + state + "2" + move::leftId),
                          {letter1}}] = {
                 p(state::mutateFirst + state), {letter1}, move::right};
 
+            // if we mutated the second then just go search the first head
             transitions[{p(state::mutateSecond + state + letter1), {BLANK}}] = {
                 p(state::searchFirst + state + letter1),
                 {letter::headIndicator},
                 move::left};
         }
-        // found the place to put indicator
+        // found the place to put the head
         transitions[{p(state::mutateFirst + state), {BLANK}}] = {
             p(state::fetchFirst + state), {letter::headIndicator}, move::left};
     }
 
     return std::move(transitions);
 }
-transitions_t &&addTest(transitions_t &&transitions) {
-    std::ranges::for_each(alphabet, [&](const auto &letter) {
-        transitions[{p(state::test + "(copyA)"), {letter}}] = {
-            p(state::test + "(copyA)"), {letter}, move::left};
-    });
-    transitions[{p(state::test + "(copyA)"), {letter::headIndicator}}] = {
-        p(state::test + "(copyA)"), {BLANK}, move::left};
-    return std::move(transitions);
-}
 }  // namespace
 
 void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes) {
-    // convert tape
-    tapes = prepareTape(*this, tapes);
+    this->num_tapes = 1;
 
-    // define states
-    originalStates = this->set_of_states();
-
-    // define alphabets
-    // std::ranges::copy(originalStates,
-    //                   std::ostream_iterator<std::string>(std::cout, " "));
-    // std::cout << std::endl;
-    alphabet = this->working_alphabet();
-    extAlphabetNoSep = alphabet;
-    std::ranges::copy(std::vector<std::string>{leftGuard, rightGuard, separator,
-                                               letter::headIndicator},
-                      std::back_inserter(extAlphabetNoSep));
-    extAlphabet = extAlphabetNoSep;
-    extAlphabet.push_back(separator);
+    prepareGlobals(*this);
 
     // make new states
-    this->transitions = addTest(addMutators(
+    this->transitions = addMutators(
         *this, addSearchersAndFetchers(addSeparatorRejects(
-                   addResizers(addSeparatorSeekers(*this, transitions_t()))))));
-    // for (const auto &[from, to] : this->transitions)
-    // {
-    //     std::cout << from.first << " " << from.second[0] << " " <<
-    //     std::get<0>(to) << " " << std::get<1>(to)[0] << " " <<
-    //     std::get<2>(to)
-    //     << std::endl;
-    // }
-    std::cout << "number of states: " << this->transitions.size();
+                   addResizers(addTapePreparators(transitions_t())))));
+    std::cout << this->transitions.size();
 }
-//--------------------------------------------------------------------------------------------//
+//--------------END IMPLEMENTATION-----------------------//
 
 class Reader {
    public:
