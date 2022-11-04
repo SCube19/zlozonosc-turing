@@ -62,6 +62,7 @@ const std::string mutateFirst = "(mtxF)";
 const std::string mutateSecond = "(mtxS)";
 
 // separator reject
+const std::string checkFall = "(winfall)";
 const std::string die = "(die)";
 }  // namespace state
 
@@ -144,6 +145,7 @@ transitions_t &&addTapePreparators(transitions_t &&transitions) {
         transitions[{p(state::placeLeftGuard + letter), {BLANK}}] = {
             state::reverseFind, {letter}, move::stay};
 
+        // reversing input
         transitions[{state::reverseFind, {letter}}] = {
             p(state::reversePlace + letter), {reverseIndicator}, move::right};
         transitions[{state::reverseFind, {reverseIndicator}}] = {
@@ -161,6 +163,7 @@ transitions_t &&addTapePreparators(transitions_t &&transitions) {
         transitions[{state::reverseSkip, {letter}}] = {
             state::reverseSkip, {letter}, move::left};
 
+        // adding head indicator slots
         transitions[{state::prepareFirstTape, {letter}}] = {
             p(state::prepareFirstTape + letter),
             {reverseIndicator},
@@ -181,6 +184,7 @@ transitions_t &&addTapePreparators(transitions_t &&transitions) {
         transitions[{p(state::prepareFirstTape + "2"), {reverseIndicator}}] = {
             state::prepareFirstTape, {BLANK}, move::right};
     }
+    // some left-overs independent from letters
     transitions[{state::reverseFind, {leftGuard}}] = {
         state::prepareFirstTape, {leftGuard}, move::right};
 
@@ -192,6 +196,7 @@ transitions_t &&addTapePreparators(transitions_t &&transitions) {
     transitions[{state::prepareFirstTape, {BLANK}}] = {
         state::createRightTape, {BLANK}, move::left};
 
+    // append 1 (Sep) _ _ (Rg)
     transitions[{state::createRightTape, {BLANK}}] = {
         p(state::createRightTape + "1"), {letter::headIndicator}, move::right};
     transitions[{p(state::createRightTape + "1"), {BLANK}}] = {
@@ -203,13 +208,24 @@ transitions_t &&addTapePreparators(transitions_t &&transitions) {
     transitions[{p(state::createRightTape + "4"), {BLANK}}] = {
         state::seekSeparator, {rightGuard}, move::left};
 
+    // go 3 to the left
     transitions[{state::seekSeparator, {BLANK}}] = {
         state::seekSeparator, {BLANK}, move::left};
     transitions[{state::seekSeparator, {letter::headIndicator}}] = {
         state::seekSeparator, {letter::headIndicator}, move::left};
 
+    // start simulation
     transitions[{state::seekSeparator, {separator}}] = {
-        ACCEPTING_STATE, {separator}, move::left};
+        state::searchFirst, {separator}, move::left};
+
+    // empty word cornercase
+    transitions[{INITIAL_STATE, {BLANK}}] = {
+        p(state::prepareFirstTape + "1"), {leftGuard}, move::right};
+    transitions[{p(state::prepareFirstTape + "1"), {BLANK}}] = {
+        p(state::prepareFirstTape + "2"), {BLANK}, move::right};
+    transitions[{p(state::prepareFirstTape + "2"), {BLANK}}] = {
+        state::prepareFirstTape, {BLANK}, move::right};
+
     return std::move(transitions);
 }
 
@@ -421,6 +437,21 @@ transitions_t &&addSearchersAndFetchers(transitions_t &&transitions) {
 // main simulator states
 transitions_t &&addMutators(const TuringMachine &tm,
                             transitions_t &&transitions) {
+    // false accept states
+    transitions[{p(state::checkFall + move::rightId),
+                 {letter::headIndicator}}] = {
+        ACCEPTING_STATE, {letter::headIndicator}, move::stay};
+    transitions[{p(state::checkFall + move::stayId), {letter::headIndicator}}] =
+        {ACCEPTING_STATE, {letter::headIndicator}, move::stay};
+    transitions[{p(state::checkFall + move::leftId), {letter::headIndicator}}] =
+        {p(state::checkFall + "1"), {letter::headIndicator}, move::right};
+    std::ranges::for_each(extAlphabet, [&](const auto &letter) {
+        transitions[{p(state::checkFall + "1"), {letter}}] = {
+            ACCEPTING_STATE, {letter}, move::stay};
+    });
+    transitions[{p(state::checkFall + "1"), {separator}}] = {
+        state::die, {separator}, move::left};
+
     // consider every combination of letters and states
     for (const auto &state : originalStates) {
         for (const auto &letter1 : alphabet) {
@@ -436,7 +467,7 @@ transitions_t &&addMutators(const TuringMachine &tm,
                         transitions[{
                             p(state::mutateFirst + state + letter1 + letter2),
                             {letter::headIndicator}}] = {
-                            ACCEPTING_STATE,
+                            p(state::checkFall + move::id(moves[0])),
                             {letter::headIndicator},
                             move::stay};
                     // reject rejecting states
@@ -567,7 +598,7 @@ transitions_t &&addMutators(const TuringMachine &tm,
 }
 }  // namespace
 
-void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes) {
+void TuringMachine::twoToOne() {
     this->num_tapes = 1;
 
     prepareGlobals(*this);
@@ -576,7 +607,6 @@ void TuringMachine::twoToOne(std::vector<std::vector<std::string>> &tapes) {
     this->transitions = addMutators(
         *this, addSearchersAndFetchers(addSeparatorRejects(
                    addResizers(addTapePreparators(transitions_t())))));
-    std::cout << this->transitions.size();
 }
 //--------------END IMPLEMENTATION-----------------------//
 

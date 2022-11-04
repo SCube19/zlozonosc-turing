@@ -9,7 +9,8 @@
 #include <utility>
 #include <vector>
 
-// an identifier (which can be used as a name of a letter or a state) is of the form:
+// an identifier (which can be used as a name of a letter or a state) is of the
+// form:
 // * a single letter from {A-Z, a-z, 0-9, _, -}
 // * a nonempty sequence of indentifiers surrounded in brackets (...)
 // examples of valid identifiers: A, 0, _, (0), (start), ((abc)-(def)(_))
@@ -25,17 +26,19 @@
 #define HEAD_RIGHT '>'
 #define HEAD_STAY '-'
 
-typedef std::map<std::pair<std::string, std::vector<std::string>>, std::tuple<std::string, std::vector<std::string>, std::string>> transitions_t;
+typedef std::map<std::pair<std::string, std::vector<std::string>>,
+                 std::tuple<std::string, std::vector<std::string>, std::string>>
+    transitions_t;
 
-struct TuringMachine
-{
+struct TuringMachine {
     int num_tapes;
 
     std::vector<std::string> input_alphabet;
 
     transitions_t transitions;
     // (state, [letter_on_tape_1, ..., letter_on_tape_k])
-    //    -> (new_state, [new_letter_on_tape_1, ..., new_letter_on_tape_k], [move_on_tape_1, ..., move_on_tape_k])
+    //    -> (new_state, [new_letter_on_tape_1, ..., new_letter_on_tape_k],
+    //    [move_on_tape_1, ..., move_on_tape_k])
 
     TuringMachine(int, std::vector<std::string>, transitions_t);
 
@@ -49,11 +52,11 @@ struct TuringMachine
     // ERROR <=> input!="" && returned_value.empty()
 
     //--------ADDED SECTION---------//
-    void twoToOne(std::vector<std::vector<std::string>> &tapes);
+    void twoToOne();
 };
 
-static inline std::ostream &operator<<(std::ostream &output, const TuringMachine &tm)
-{
+static inline std::ostream &operator<<(std::ostream &output,
+                                       const TuringMachine &tm) {
     tm.save_to_file(output);
     return output;
 }
